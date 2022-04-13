@@ -268,6 +268,36 @@ odbc_dstr_swap(DSTR *a, DSTR *b)
 	*b = tmp;
 }
 
+static bool
+odbc_parse_connect_string_value(TDS_ERRS *errs, const char **current_position, const char **current_end, const char *connect_string_end, DSTR *value)
+{
+	const char *p = *current_position;
+	const char *end = *current_end;
+	if (*p == '{') {
+		++p;
+		/* search "};" */
+		end = p;
+		while ((end = (const char *) memchr(end, '}', connect_string_end - end)) != NULL) {
+			if ((end + 1) != connect_string_end && end[1] == ';')
+				break;
+			++end;
+		}
+	} else {
+		end = (const char *) memchr(p, ';', connect_string_end - p);
+	}
+	if (!end)
+		end = connect_string_end;
+
+	if (!tds_dstr_copyn(value, p, end - p)) {
+		odbc_errs_add(errs, "HY001", NULL);
+		return false;
+	}
+
+	*current_position = p;
+	*current_end = end;
+	return true;
+}
+
 /** 
  * Parse connection string and fill login according
  * @param connect_string     connect string
@@ -316,23 +346,7 @@ odbc_parse_connect_string(TDS_ERRS *errs, const char *connect_string, const char
 
 		/* parse value */
 		p = end + 1;
-		if (*p == '{') {
-			++p;
-			/* search "};" */
-			end = p;
-			while ((end = (const char *) memchr(end, '}', connect_string_end - end)) != NULL) {
-				if ((end + 1) != connect_string_end && end[1] == ';')
-					break;
-				++end;
-			}
-		} else {
-			end = (const char *) memchr(p, ';', connect_string_end - p);
-		}
-		if (!end)
-			end = connect_string_end;
-
-		if (!tds_dstr_copyn(&value, p, end - p)) {
-			odbc_errs_add(errs, "HY001", NULL);
+		if (!odbc_parse_connect_string_value(errs, &p, &end, connect_string_end, &value)) {
 			return false;
 		}
 
