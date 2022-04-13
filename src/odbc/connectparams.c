@@ -270,28 +270,37 @@ odbc_dstr_swap(DSTR *a, DSTR *b)
 static bool
 odbc_parse_connect_string_value_escaped(TDS_ERRS *errs, const char **current_position, const char **current_end, const char *connect_string_end, DSTR *value)
 {
-	const char *p = *current_position;
-	const char *end = *current_end;
+	const char *end;
+	char *new_value = strdup(*current_position);
+	char *new_value_ptr;
 
-	++p;
-	/* search "};" */
-	end = p;
-	while ((end = (const char *) memchr(end, '}', connect_string_end - end)) != NULL) {
-		if ((end + 1) != connect_string_end && end[1] == ';')
+	for (end = *current_position + 1, new_value_ptr = new_value  ; end != connect_string_end; ++end) {
+		char peek = (end+1) == connect_string_end ? '\0' : *(end+1);
+		if (peek == '\0') {
+			odbc_errs_add(errs, "01S00", "Connection string ended without closing } character");
+			free(new_value);
+			return false;
+		}
+
+		if ((*end == '{' || *end == '}') && *end == peek) {
+			++end;
+		} else if (*end == '}' && peek == ';') {
 			break;
-		++end;
+		}
+
+		*new_value_ptr = *end;
+		++new_value_ptr;
 	}
+	*new_value_ptr = '\0';
 
-	if (!end)
-		end = connect_string_end;
-
-	if (!tds_dstr_copyn(value, p, end - p)) {
+	if (!tds_dstr_copyn(value, new_value, strlen(new_value))) {
 		odbc_errs_add(errs, "HY001", NULL);
+		free(new_value);
 		return false;
 	}
 
-	*current_position = p;
 	*current_end = end;
+	free(new_value);
 	return true;
 }
 
