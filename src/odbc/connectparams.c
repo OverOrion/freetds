@@ -267,24 +267,21 @@ odbc_dstr_swap(DSTR *a, DSTR *b)
 	*a = *b;
 	*b = tmp;
 }
-
 static bool
-odbc_parse_connect_string_value(TDS_ERRS *errs, const char **current_position, const char **current_end, const char *connect_string_end, DSTR *value)
+odbc_parse_connect_string_value_escaped(TDS_ERRS *errs, const char **current_position, const char **current_end, const char *connect_string_end, DSTR *value)
 {
 	const char *p = *current_position;
 	const char *end = *current_end;
-	if (*p == '{') {
-		++p;
-		/* search "};" */
-		end = p;
-		while ((end = (const char *) memchr(end, '}', connect_string_end - end)) != NULL) {
-			if ((end + 1) != connect_string_end && end[1] == ';')
-				break;
-			++end;
-		}
-	} else {
-		end = (const char *) memchr(p, ';', connect_string_end - p);
+
+	++p;
+	/* search "};" */
+	end = p;
+	while ((end = (const char *) memchr(end, '}', connect_string_end - end)) != NULL) {
+		if ((end + 1) != connect_string_end && end[1] == ';')
+			break;
+		++end;
 	}
+
 	if (!end)
 		end = connect_string_end;
 
@@ -296,6 +293,37 @@ odbc_parse_connect_string_value(TDS_ERRS *errs, const char **current_position, c
 	*current_position = p;
 	*current_end = end;
 	return true;
+}
+
+static bool
+odbc_parse_connect_string_value_simple(TDS_ERRS *errs, const char **current_position, const char **current_end, const char *connect_string_end, DSTR *value)
+{
+	const char *p = *current_position;
+	const char *end = *current_end;
+
+	end = (const char *) memchr(p, ';', connect_string_end - p);
+
+	if (!end)
+		end = connect_string_end;
+
+	if (!tds_dstr_copyn(value, p, end - p)) {
+		odbc_errs_add(errs, "HY001", NULL);
+		return false;
+	}
+
+	*current_position = p;
+	*current_end = end;
+	return true;
+}
+
+static bool
+odbc_parse_connect_string_value(TDS_ERRS *errs, const char **current_position, const char **current_end, const char *connect_string_end, DSTR *value)
+{
+	if (**current_position == '{') {
+		return odbc_parse_connect_string_value_escaped(errs, current_position, current_end, connect_string_end, value);
+	}
+
+	return odbc_parse_connect_string_value_simple(errs, current_position, current_end, connect_string_end, value);
 }
 
 /** 
