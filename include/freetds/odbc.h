@@ -529,10 +529,7 @@ enum {
  * connectparams.h
  */
 
-typedef struct {
-	const char *p;
-	size_t len;
-} TDS_PARSED_PARAM;
+typedef DSTR TDS_PARSED_PARAM;
 
 /**
  * Parses a connection string for SQLDriverConnect().
@@ -546,6 +543,8 @@ int odbc_get_dsn_info(TDS_ERRS *errs, const char *DSN, TDSLOGIN * login);
 #ifdef _WIN32
 int odbc_build_connect_string(TDS_ERRS *errs, TDS_PARSED_PARAM *params, char **out);
 #endif
+void tds_parsed_param_init(TDS_PARSED_PARAM *parsed_params);
+void tds_parsed_param_free(TDS_PARSED_PARAM *parsed_params);
 
 /*
  * convert_tds2sql.c

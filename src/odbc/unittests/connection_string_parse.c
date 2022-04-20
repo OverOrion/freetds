@@ -33,8 +33,10 @@ simple_string(void)
   if (!odbc_parse_connect_string(&errs, connect_string, connect_string_end, login, parsed_params))
      return 1;
 
+  assert_equal_str(parsed_params[ODBC_PARAM_UID], "test_username");
   assert_equal_str(login->server_name, "127.0.0.1");
   assert_equal_str(login->password, "test_password");
+  assert_equal_str(parsed_params[ODBC_PARAM_PWD], "test_password");
   assert(login->port == 1337);
 
   tds_free_login(login);
@@ -63,8 +65,10 @@ simple_escaped_string(void)
   if (!odbc_parse_connect_string(&errs, connect_string, connect_string_end, login, parsed_params))
      return 1;
 
+  assert_equal_str(parsed_params[ODBC_PARAM_UID], "test_username");
   assert_equal_str(login->server_name, "127.0.0.1");
   assert_equal_str(login->password, "test_password");
+  assert_equal_str(parsed_params[ODBC_PARAM_PWD], "test_password");
   assert(login->port == 1337);
 
   tds_free_login(login);
@@ -93,8 +97,10 @@ test_special_symbols(void)
   if (!odbc_parse_connect_string(&errs, connect_string, connect_string_end, login, parsed_params))
      return 1;
 
+  assert_equal_str(parsed_params[ODBC_PARAM_UID], "test_username");
   assert_equal_str(login->server_name, "127.0.0.1");
   assert_equal_str(login->password, "[]{}(),;?*=!@");
+  assert_equal_str(parsed_params[ODBC_PARAM_PWD], "[]{}(),;?*=!@");
   assert(login->port == 1337);
 
   tds_free_login(login);
@@ -123,8 +129,10 @@ password_contains_curly_braces(void)
   if (!odbc_parse_connect_string(&errs, connect_string, connect_string_end, login, parsed_params))
      return 1;
 
+  assert_equal_str(parsed_params[ODBC_PARAM_UID], "test_username");
   assert_equal_str(login->server_name, "127.0.0.1");
   assert_equal_str(login->password, "test{}_password");
+  assert_equal_str(parsed_params[ODBC_PARAM_PWD], "test{}_password");
   assert(login->port == 1337);
 
   tds_free_login(login);
@@ -153,8 +161,10 @@ password_contains_curly_braces_and_separator(void)
   if (!odbc_parse_connect_string(&errs, connect_string, connect_string_end, login, parsed_params))
      return 1;
 
+  assert_equal_str(parsed_params[ODBC_PARAM_UID], "test_username");
   assert_equal_str(login->server_name, "127.0.0.1");
   assert_equal_str(login->password, "test{};_password");
+  assert_equal_str(parsed_params[ODBC_PARAM_PWD], "test{};_password");
   assert(login->port == 1337);
 
   tds_free_login(login);

@@ -257,6 +257,24 @@ odbc_get_dsn_info(TDS_ERRS *errs, const char *DSN, TDSLOGIN * login)
 	return 1;
 }
 
+void
+tds_parsed_param_init(TDS_PARSED_PARAM *parsed_params)
+{
+	unsigned int i;
+	for (i=0;i<ODBC_PARAM_SIZE;++i) {
+		parsed_params[i] = DSTR_INITIALIZER;
+	}
+}
+
+void
+tds_parsed_param_free(TDS_PARSED_PARAM *parsed_params)
+{
+	unsigned int i;
+	for (i=0;i<ODBC_PARAM_SIZE;++i) {
+		tds_dstr_free(&parsed_params[i]);
+	}
+}
+
 /**
  * Swap two DSTR
  */
@@ -267,6 +285,7 @@ odbc_dstr_swap(DSTR *a, DSTR *b)
 	*a = *b;
 	*b = tmp;
 }
+
 static bool
 odbc_parse_connect_string_value_escaped(TDS_ERRS *errs, const char **current_position, const char **current_end, const char *connect_string_end, DSTR *value)
 {
@@ -335,6 +354,137 @@ odbc_parse_connect_string_value(TDS_ERRS *errs, const char **current_position, c
 	return odbc_parse_connect_string_value_simple(errs, current_position, current_end, connect_string_end, value);
 }
 
+enum SetParamResult { SPR_REPARSE, SPR_CONTINUE, SPR_ERROR };
+
+static enum SetParamResult
+odbc_set_params(TDS_ERRS *errs, const char *key, DSTR *value, unsigned int *cfgs, int *trusted, TDSLOGIN * login, TDS_PARSED_PARAM *parsed_params)
+{
+	DSTR *dest_s = NULL;
+	int num_param = -1;
+	enum { CFG_DSN = 1, CFG_SERVER = 2, CFG_SERVERNAME = 4 };
+
+#define CHK_PARAM(p) (strcasecmp(key, odbc_param_##p) == 0 && (num_param=ODBC_PARAM_##p) >= 0)
+	if (CHK_PARAM(Server)) {
+		/* error if servername or DSN specified */
+		if ((*cfgs & (CFG_DSN|CFG_SERVERNAME)) != 0) {
+			tds_dstr_free(value);
+			odbc_errs_add(errs, "HY000", "Only one between SERVER, SERVERNAME and DSN can be specified");
+			return false;
+		}
+		if (!*cfgs) {
+			dest_s = &login->server_name;
+			/* not that safe cast but works -- freddy77 */
+			if (!parse_server(errs, (char *) tds_dstr_cstr(value), login)) {
+				tds_dstr_free(value);
+				return false;
+			}
+			*cfgs = CFG_SERVER;
+		}
+	} else if (CHK_PARAM(Servername)) {
+		if ((*cfgs & (CFG_DSN|CFG_SERVER)) != 0) {
+			tds_dstr_free(value);
+			odbc_errs_add(errs, "HY000", "Only one between SERVER, SERVERNAME and DSN can be specified");
+			return false;
+		}
+		if (!*cfgs) {
+			odbc_dstr_swap(&login->server_name, value);
+			tds_read_conf_file(login, tds_dstr_cstr(&login->server_name));
+			*cfgs = CFG_SERVERNAME;
+			return SPR_REPARSE;
+		}
+	} else if (CHK_PARAM(DSN)) {
+		if ((*cfgs & (CFG_SERVER|CFG_SERVERNAME)) != 0) {
+			tds_dstr_free(value);
+			odbc_errs_add(errs, "HY000", "Only one between SERVER, SERVERNAME and DSN can be specified");
+			return false;
+		}
+		if (!*cfgs) {
+			if (!odbc_get_dsn_info(errs, tds_dstr_cstr(value), login)) {
+				tds_dstr_free(value);
+				return false;
+			}
+			*cfgs = CFG_DSN;
+			return SPR_REPARSE;
+		}
+	} else if (CHK_PARAM(Database)) {
+		dest_s = &login->database;
+	} else if (CHK_PARAM(UID)) {
+		dest_s = &login->user_name;
+	} else if (CHK_PARAM(PWD)) {
+		dest_s = &login->password;
+	} else if (CHK_PARAM(APP)) {
+		dest_s = &login->app_name;
+	} else if (CHK_PARAM(WSID)) {
+		dest_s = &login->client_host_name;
+	} else if (CHK_PARAM(Language)) {
+		tds_parse_conf_section(TDS_STR_LANGUAGE, tds_dstr_cstr(value), login);
+	} else if (CHK_PARAM(Port)) {
+		tds_parse_conf_section(TDS_STR_PORT, tds_dstr_cstr(value), login);
+	} else if (CHK_PARAM(TDS_Version)) {
+		tds_parse_conf_section(TDS_STR_VERSION, tds_dstr_cstr(value), login);
+	} else if (CHK_PARAM(TextSize)) {
+		tds_parse_conf_section(TDS_STR_TEXTSZ, tds_dstr_cstr(value), login);
+	} else if (CHK_PARAM(PacketSize)) {
+		tds_parse_conf_section(TDS_STR_BLKSZ, tds_dstr_cstr(value), login);
+	} else if (CHK_PARAM(ClientCharset)
+		   ||  strcasecmp(key, "client_charset") == 0) {
+		num_param = ODBC_PARAM_ClientCharset;
+		tds_parse_conf_section(TDS_STR_CLCHARSET, tds_dstr_cstr(value), login);
+	} else if (CHK_PARAM(DumpFile)) {
+		tds_parse_conf_section(TDS_STR_DUMPFILE, tds_dstr_cstr(value), login);
+	} else if (CHK_PARAM(DumpFileAppend)) {
+		tds_parse_conf_section(TDS_STR_APPENDMODE, tds_dstr_cstr(value), login);
+	} else if (CHK_PARAM(DebugFlags)) {
+		tds_parse_conf_section(TDS_STR_DEBUGFLAGS, tds_dstr_cstr(value), login);
+	} else if (CHK_PARAM(Encryption)) {
+		tds_parse_conf_section(TDS_STR_ENCRYPTION, tds_dstr_cstr(value), login);
+	} else if (CHK_PARAM(UseNTLMv2)) {
+		tds_parse_conf_section(TDS_STR_USENTLMV2, tds_dstr_cstr(value), login);
+	} else if (CHK_PARAM(REALM)) {
+		tds_parse_conf_section(TDS_STR_REALM, tds_dstr_cstr(value), login);
+	} else if (CHK_PARAM(ServerSPN)) {
+		tds_parse_conf_section(TDS_STR_SPN, tds_dstr_cstr(value), login);
+	} else if (CHK_PARAM(Trusted_Connection)) {
+		*trusted = tds_config_boolean(key, tds_dstr_cstr(value), login);
+		tdsdump_log(TDS_DBG_INFO1, "trusted %s -> %d\n", tds_dstr_cstr(value), *trusted);
+		num_param = -1;
+		/* TODO odbc_param_Address field */
+	} else if (CHK_PARAM(MARS_Connection)) {
+		if (tds_config_boolean(key, tds_dstr_cstr(value), login))
+			login->mars = 1;
+	} else if (CHK_PARAM(AttachDbFilename)) {
+		dest_s = &login->db_filename;
+	} else if (CHK_PARAM(ApplicationIntent)) {
+		const char *readonly_intent;
+
+		if (strcasecmp(tds_dstr_cstr(value), "ReadOnly") == 0) {
+			readonly_intent = "yes";
+		} else if (strcasecmp(tds_dstr_cstr(value), "ReadWrite") == 0) {
+			readonly_intent = "no";
+		} else {
+			tdsdump_log(TDS_DBG_ERROR, "Invalid ApplicationIntent %s\n", tds_dstr_cstr(value));
+			tds_dstr_free(value);
+			return false;
+		}
+
+		tds_parse_conf_section(TDS_STR_READONLY_INTENT, readonly_intent, login);
+		tdsdump_log(TDS_DBG_INFO1, "Application Intent %s\n", readonly_intent);
+	} else if (CHK_PARAM(Timeout)) {
+		tds_parse_conf_section(TDS_STR_TIMEOUT, tds_dstr_cstr(value), login);
+	}
+
+
+	if (num_param >= 0 && parsed_params) {
+		parsed_params[num_param] = *tds_dstr_dup(&parsed_params[num_param], value);
+	}
+
+	/* copy to destination */
+	if (dest_s)
+		odbc_dstr_swap(dest_s, value);
+
+	return true;
+}
+
 /** 
  * Parse connection string and fill login according
  * @param connect_string     connect string
@@ -347,19 +497,18 @@ odbc_parse_connect_string(TDS_ERRS *errs, const char *connect_string, const char
 			  TDS_PARSED_PARAM *parsed_params)
 {
 	const char *p, *end;
-	DSTR *dest_s, value = DSTR_INITIALIZER;
-	enum { CFG_DSN = 1, CFG_SERVER = 2, CFG_SERVERNAME = 4 };
+	DSTR value = DSTR_INITIALIZER;
 	unsigned int cfgs = 0;	/* flags for indicate second parse of string */
 	char option[24];
 	int trusted = 0;
+	enum SetParamResult result = 0;
+	const char *yes_value = "Yes";
 
-	if (parsed_params)
-		memset(parsed_params, 0, sizeof(*parsed_params)*ODBC_PARAM_SIZE);
+	if (parsed_params) {
+		tds_parsed_param_init(parsed_params);
+	}
 
 	for (p = connect_string; p < connect_string_end && *p;) {
-		int num_param = -1;
-
-		dest_s = NULL;
 
 		/* handle empty options */
 		while (p < connect_string_end && *p == ';')
@@ -384,145 +533,40 @@ odbc_parse_connect_string(TDS_ERRS *errs, const char *connect_string, const char
 		/* parse value */
 		p = end + 1;
 		if (!odbc_parse_connect_string_value(errs, &p, &end, connect_string_end, &value)) {
+			if (parsed_params) {
+				tds_parsed_param_free(parsed_params);
+			}
 			return false;
 		}
 
-#define CHK_PARAM(p) (strcasecmp(option, odbc_param_##p) == 0 && (num_param=ODBC_PARAM_##p) >= 0)
-		if (CHK_PARAM(Server)) {
-			/* error if servername or DSN specified */
-			if ((cfgs & (CFG_DSN|CFG_SERVERNAME)) != 0) {
-				tds_dstr_free(&value);
-				odbc_errs_add(errs, "HY000", "Only one between SERVER, SERVERNAME and DSN can be specified");
-				return false;
-			}
-			if (!cfgs) {
-				dest_s = &login->server_name;
-				/* not that safe cast but works -- freddy77 */
-				if (!parse_server(errs, (char *) tds_dstr_cstr(&value), login)) {
-					tds_dstr_free(&value);
-					return false;
+		result = odbc_set_params(errs, option, &value, &cfgs, &trusted, login, parsed_params);
+		switch (result) {
+			case SPR_ERROR:
+				if (parsed_params) {
+					tds_parsed_param_free(parsed_params);
 				}
-				cfgs = CFG_SERVER;
-			}
-		} else if (CHK_PARAM(Servername)) {
-			if ((cfgs & (CFG_DSN|CFG_SERVER)) != 0) {
-				tds_dstr_free(&value);
-				odbc_errs_add(errs, "HY000", "Only one between SERVER, SERVERNAME and DSN can be specified");
 				return false;
-			}
-			if (!cfgs) {
-				odbc_dstr_swap(&login->server_name, &value);
-				tds_read_conf_file(login, tds_dstr_cstr(&login->server_name));
-				cfgs = CFG_SERVERNAME;
+			case SPR_REPARSE:
 				p = connect_string;
-				continue;
-			}
-		} else if (CHK_PARAM(DSN)) {
-			if ((cfgs & (CFG_SERVER|CFG_SERVERNAME)) != 0) {
-				tds_dstr_free(&value);
-				odbc_errs_add(errs, "HY000", "Only one between SERVER, SERVERNAME and DSN can be specified");
-				return false;
-			}
-			if (!cfgs) {
-				if (!odbc_get_dsn_info(errs, tds_dstr_cstr(&value), login)) {
-					tds_dstr_free(&value);
-					return false;
-				}
-				cfgs = CFG_DSN;
-				p = connect_string;
-				continue;
-			}
-		} else if (CHK_PARAM(Database)) {
-			dest_s = &login->database;
-		} else if (CHK_PARAM(UID)) {
-			dest_s = &login->user_name;
-		} else if (CHK_PARAM(PWD)) {
-			dest_s = &login->password;
-		} else if (CHK_PARAM(APP)) {
-			dest_s = &login->app_name;
-		} else if (CHK_PARAM(WSID)) {
-			dest_s = &login->client_host_name;
-		} else if (CHK_PARAM(Language)) {
-			tds_parse_conf_section(TDS_STR_LANGUAGE, tds_dstr_cstr(&value), login);
-		} else if (CHK_PARAM(Port)) {
-			tds_parse_conf_section(TDS_STR_PORT, tds_dstr_cstr(&value), login);
-		} else if (CHK_PARAM(TDS_Version)) {
-			tds_parse_conf_section(TDS_STR_VERSION, tds_dstr_cstr(&value), login);
-		} else if (CHK_PARAM(TextSize)) {
-			tds_parse_conf_section(TDS_STR_TEXTSZ, tds_dstr_cstr(&value), login);
-		} else if (CHK_PARAM(PacketSize)) {
-			tds_parse_conf_section(TDS_STR_BLKSZ, tds_dstr_cstr(&value), login);
-		} else if (CHK_PARAM(ClientCharset)
-			   ||  strcasecmp(option, "client_charset") == 0) {
-			num_param = ODBC_PARAM_ClientCharset;
-			tds_parse_conf_section(TDS_STR_CLCHARSET, tds_dstr_cstr(&value), login);
-		} else if (CHK_PARAM(DumpFile)) {
-			tds_parse_conf_section(TDS_STR_DUMPFILE, tds_dstr_cstr(&value), login);
-		} else if (CHK_PARAM(DumpFileAppend)) {
-			tds_parse_conf_section(TDS_STR_APPENDMODE, tds_dstr_cstr(&value), login);
-		} else if (CHK_PARAM(DebugFlags)) {
-			tds_parse_conf_section(TDS_STR_DEBUGFLAGS, tds_dstr_cstr(&value), login);
-		} else if (CHK_PARAM(Encryption)) {
-			tds_parse_conf_section(TDS_STR_ENCRYPTION, tds_dstr_cstr(&value), login);
-		} else if (CHK_PARAM(UseNTLMv2)) {
-			tds_parse_conf_section(TDS_STR_USENTLMV2, tds_dstr_cstr(&value), login);
-		} else if (CHK_PARAM(REALM)) {
-			tds_parse_conf_section(TDS_STR_REALM, tds_dstr_cstr(&value), login);
-		} else if (CHK_PARAM(ServerSPN)) {
-			tds_parse_conf_section(TDS_STR_SPN, tds_dstr_cstr(&value), login);
-		} else if (CHK_PARAM(Trusted_Connection)) {
-			trusted = tds_config_boolean(option, tds_dstr_cstr(&value), login);
-			tdsdump_log(TDS_DBG_INFO1, "trusted %s -> %d\n", tds_dstr_cstr(&value), trusted);
-			num_param = -1;
-			/* TODO odbc_param_Address field */
-		} else if (CHK_PARAM(MARS_Connection)) {
-			if (tds_config_boolean(option, tds_dstr_cstr(&value), login))
-				login->mars = 1;
-		} else if (CHK_PARAM(AttachDbFilename)) {
-			dest_s = &login->db_filename;
-		} else if (CHK_PARAM(ApplicationIntent)) {
-			const char *readonly_intent;
-
-			if (strcasecmp(tds_dstr_cstr(&value), "ReadOnly") == 0) {
-				readonly_intent = "yes";
-			} else if (strcasecmp(tds_dstr_cstr(&value), "ReadWrite") == 0) {
-				readonly_intent = "no";
-			} else {
-				tdsdump_log(TDS_DBG_ERROR, "Invalid ApplicationIntent %s\n", tds_dstr_cstr(&value));
-				tds_dstr_free(&value);
-				return false;
-			}
-
-			tds_parse_conf_section(TDS_STR_READONLY_INTENT, readonly_intent, login);
-			tdsdump_log(TDS_DBG_INFO1, "Application Intent %s\n", readonly_intent);
-		} else if (CHK_PARAM(Timeout)) {
-			tds_parse_conf_section(TDS_STR_TIMEOUT, tds_dstr_cstr(&value), login);
-		}
-
-		if (num_param >= 0 && parsed_params) {
-			parsed_params[num_param].p = p;
-			parsed_params[num_param].len = end - p;
-		}
-
-		/* copy to destination */
-		if (dest_s)
-			odbc_dstr_swap(dest_s, &value);
-
-		p = end;
-		/* handle "" ";.." "};.." cases */
-		if (p >= connect_string_end)
+			case SPR_CONTINUE:
+				p = end;
+				/* handle "" ";.." "};.." cases */
+				if (p >= connect_string_end)
+					break;
+				if (*p == '}')
+					++p;
+				++p;
 			break;
-		if (*p == '}')
-			++p;
-		++p;
+		}
 	}
 
 	if (trusted) {
 		if (parsed_params) {
-			parsed_params[ODBC_PARAM_Trusted_Connection].p = "Yes";
-			parsed_params[ODBC_PARAM_Trusted_Connection].len = 3;
-			parsed_params[ODBC_PARAM_UID].p = NULL;
-			parsed_params[ODBC_PARAM_PWD].p = NULL;
+			if (!tds_dstr_copyn(&parsed_params[ODBC_PARAM_Trusted_Connection], yes_value, strlen(yes_value))){
+        return false;
+      }
+			tds_dstr_empty(&parsed_params[ODBC_PARAM_UID]);
+			tds_dstr_empty(&parsed_params[ODBC_PARAM_PWD]);
 		}
 		tds_dstr_empty(&login->user_name);
 		tds_dstr_empty(&login->password);
@@ -542,8 +586,8 @@ odbc_build_connect_string(TDS_ERRS *errs, TDS_PARSED_PARAM *params, char **out)
 
 	/* compute string size */
 	for (n = 0; n < ODBC_PARAM_SIZE; ++n) {
-		if (params[n].p)
-			len += strlen(odbc_param_names[n]) + params[n].len + 2;
+		if (!tds_dstr_isempty(params[n]))
+			len += strlen(odbc_param_names[n]) + tds_dstr_len(params[n]) + 2;
 	}
 
 	/* allocate */
@@ -556,8 +600,8 @@ odbc_build_connect_string(TDS_ERRS *errs, TDS_PARSED_PARAM *params, char **out)
 
 	/* build it */
 	for (n = 0; n < ODBC_PARAM_SIZE; ++n) {
-		if (params[n].p)
-			p += sprintf(p, "%s=%.*s;", odbc_param_names[n], (int) params[n].len, params[n].p);
+		if (!tds_dstr_isempty(params[n]))
+			p += sprintf(p, "%s=%.*s;", odbc_param_names[n], (int) tds_dstr_len(params[n]), tds_dstr_cstr(params[n]));
 	}
 	*p = 0;
 	return 1;

@@ -615,31 +615,37 @@ ODBC_FUNC(SQLDriverConnect, (P(SQLHDBC,hdbc), P(SQLHWND,hwnd), PCHARIN(ConnStrIn
 
 	/* add login info */
 	if (hwnd && fDriverCompletion != SQL_DRIVER_NOPROMPT
-	    && (fDriverCompletion == SQL_DRIVER_PROMPT || (!params[ODBC_PARAM_UID].p && !params[ODBC_PARAM_Trusted_Connection].p)
+	    && (fDriverCompletion == SQL_DRIVER_PROMPT || (tds_dstr_isempty(&params[ODBC_PARAM_UID]) && tds_dstr_isempty(&params[ODBC_PARAM_Trusted_Connection]))
 		|| tds_dstr_isempty(&login->server_name))) {
 #ifdef _WIN32
 		char *out = NULL;
+		const char *yes_value = "Yes";
 
 		/* prompt for login information */
 		if (!get_login_info(hwnd, login)) {
 			tds_free_login(login);
+			tds_parsed_param_free(params);
 			odbc_errs_add(&dbc->errs, "08001", "User canceled login");
 			ODBC_EXIT_(dbc);
 		}
 		if (tds_dstr_isempty(&login->user_name)) {
-			params[ODBC_PARAM_UID].p = NULL;
-			params[ODBC_PARAM_PWD].p = NULL;
-			params[ODBC_PARAM_Trusted_Connection].p = "Yes";
-			params[ODBC_PARAM_Trusted_Connection].len = 3;
+			tds_dstr_empty(&params[ODBC_PARAM_UID]);
+			tds_dstr_empty(&params[ODBC_PARAM_PWD]);
+			if(!tds_dstr_copyn(&params[ODBC_PARAM_Trusted_Connection], yes_value, strlen(yes_value))) {
+        tds_parsed_param_free(params);
+        ODBC_EXIT_(dbc);
+      }
 		} else {
-			params[ODBC_PARAM_UID].p   = tds_dstr_cstr(&login->user_name);
-			params[ODBC_PARAM_UID].len = tds_dstr_len(&login->user_name);
-			params[ODBC_PARAM_PWD].p   = tds_dstr_cstr(&login->password);
-			params[ODBC_PARAM_PWD].len = tds_dstr_len(&login->password);
-			params[ODBC_PARAM_Trusted_Connection].p = NULL;
+			if(!tds_dstr_dup(&params[ODBC_PARAM_UID], &login->user_name) || !tds_dstr_dup(&params[ODBC_PARAM_PWD], &login->password)) {
+        tds_parsed_param_free(params);
+        ODBC_EXIT_(dbc);
+      }
+			tds_dstr_empty(&params[ODBC_PARAM_Trusted_Connection]);
 		}
-		if (!odbc_build_connect_string(&dbc->errs, params, &out))
+		if (!odbc_build_connect_string(&dbc->errs, params, &out)) {
+			tds_parsed_param_free(params);
 			ODBC_EXIT_(dbc);
+		}
 
 		odbc_set_string(dbc, szConnStrOut, cbConnStrOutMax, pcbConnStrOut, out, -1);
 		tdsdump_log(TDS_DBG_INFO1, "connection string is now: %s\n", out);
@@ -652,6 +658,7 @@ ODBC_FUNC(SQLDriverConnect, (P(SQLHDBC,hdbc), P(SQLHWND,hwnd), PCHARIN(ConnStrIn
 
 	if (tds_dstr_isempty(&login->server_name)) {
 		tds_free_login(login);
+		tds_parsed_param_free(params);
 		odbc_errs_add(&dbc->errs, "IM007", "Could not find Servername or server parameter");
 		ODBC_EXIT_(dbc);
 	}
@@ -659,6 +666,7 @@ ODBC_FUNC(SQLDriverConnect, (P(SQLHDBC,hdbc), P(SQLHWND,hwnd), PCHARIN(ConnStrIn
 	odbc_connect(dbc, login);
 
 	tds_free_login(login);
+	tds_parsed_param_free(params);
 	ODBC_EXIT_(dbc);
 }
 
