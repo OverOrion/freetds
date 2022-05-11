@@ -631,7 +631,7 @@ ODBC_FUNC(SQLDriverConnect, (P(SQLHDBC,hdbc), P(SQLHWND,hwnd), PCHARIN(ConnStrIn
 		if (tds_dstr_isempty(&login->user_name)) {
 			tds_dstr_empty(&params[ODBC_PARAM_UID]);
 			tds_dstr_empty(&params[ODBC_PARAM_PWD]);
-			if(!tds_dstr_copyn(&params[ODBC_PARAM_Trusted_Connection], yes_value, strlen(yes_value))) {
+      if(!tds_dstr_copyn(&params[ODBC_PARAM_Trusted_Connection], yes_value, strlen(yes_value))) {
         tds_parsed_param_free(params);
         ODBC_EXIT_(dbc);
       }
