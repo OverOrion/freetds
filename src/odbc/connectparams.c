@@ -372,14 +372,14 @@ odbc_set_params(TDS_ERRS *errs, const char *key, DSTR *value, unsigned int *cfgs
 		if ((*cfgs & (CFG_DSN|CFG_SERVERNAME)) != 0) {
 			tds_dstr_free(value);
 			odbc_errs_add(errs, "HY000", "Only one between SERVER, SERVERNAME and DSN can be specified");
-			return false;
+			return SPR_ERROR;
 		}
 		if (!*cfgs) {
 			dest_s = &login->server_name;
 			/* not that safe cast but works -- freddy77 */
 			if (!parse_server(errs, (char *) tds_dstr_cstr(value), login)) {
 				tds_dstr_free(value);
-				return false;
+				return SPR_ERROR;
 			}
 			*cfgs = CFG_SERVER;
 		}
@@ -387,7 +387,7 @@ odbc_set_params(TDS_ERRS *errs, const char *key, DSTR *value, unsigned int *cfgs
 		if ((*cfgs & (CFG_DSN|CFG_SERVER)) != 0) {
 			tds_dstr_free(value);
 			odbc_errs_add(errs, "HY000", "Only one between SERVER, SERVERNAME and DSN can be specified");
-			return false;
+			return SPR_ERROR;
 		}
 		if (!*cfgs) {
 			odbc_dstr_swap(&login->server_name, value);
@@ -399,12 +399,12 @@ odbc_set_params(TDS_ERRS *errs, const char *key, DSTR *value, unsigned int *cfgs
 		if ((*cfgs & (CFG_SERVER|CFG_SERVERNAME)) != 0) {
 			tds_dstr_free(value);
 			odbc_errs_add(errs, "HY000", "Only one between SERVER, SERVERNAME and DSN can be specified");
-			return false;
+			return SPR_ERROR;
 		}
 		if (!*cfgs) {
 			if (!odbc_get_dsn_info(errs, tds_dstr_cstr(value), login)) {
 				tds_dstr_free(value);
-				return false;
+				return SPR_ERROR;
 			}
 			*cfgs = CFG_DSN;
 			return SPR_REPARSE;
@@ -467,7 +467,7 @@ odbc_set_params(TDS_ERRS *errs, const char *key, DSTR *value, unsigned int *cfgs
 		} else {
 			tdsdump_log(TDS_DBG_ERROR, "Invalid ApplicationIntent %s\n", tds_dstr_cstr(value));
 			tds_dstr_free(value);
-			return false;
+			return SPR_ERROR;
 		}
 
 		tds_parse_conf_section(TDS_STR_READONLY_INTENT, readonly_intent, login);
@@ -485,7 +485,7 @@ odbc_set_params(TDS_ERRS *errs, const char *key, DSTR *value, unsigned int *cfgs
 	if (dest_s)
 		odbc_dstr_swap(dest_s, value);
 
-	return true;
+	return SPR_CONTINUE;
 }
 
 /** 
@@ -504,7 +504,7 @@ odbc_parse_connect_string(TDS_ERRS *errs, const char *connect_string, const char
 	unsigned int cfgs = 0;	/* flags for indicate second parse of string */
 	char option[24];
 	int trusted = 0;
-	enum SetParamResult result = 0;
+	enum SetParamResult result = SPR_CONTINUE;
 	const char *yes_value = "Yes";
 
 	if (parsed_params)
