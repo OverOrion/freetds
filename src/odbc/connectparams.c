@@ -507,9 +507,8 @@ odbc_parse_connect_string(TDS_ERRS *errs, const char *connect_string, const char
 	enum SetParamResult result = 0;
 	const char *yes_value = "Yes";
 
-	if (parsed_params) {
+	if (parsed_params)
 		tds_parsed_param_init(parsed_params);
-	}
 
 	for (p = connect_string; p < connect_string_end && *p;) {
 
