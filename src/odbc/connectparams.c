@@ -293,8 +293,10 @@ odbc_parse_connect_string_value_escaped(TDS_ERRS *errs, const char **current_pos
 	char *new_value_ptr;
 	char *new_value = strdup(*current_position);
 
-	if (!new_value)
-	  return false;
+	if (!new_value){
+	   odbc_errs_add(errs, "HY001", NULL);
+	   return false;
+	}
 
 	for (end = *current_position + 1, new_value_ptr = new_value  ; end != connect_string_end; ++end) {
 		char peek = (end+1) == connect_string_end ? '\0' : *(end+1);
