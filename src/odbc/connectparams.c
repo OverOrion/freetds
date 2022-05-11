@@ -287,22 +287,16 @@ odbc_dstr_swap(DSTR *a, DSTR *b)
 }
 
 static bool
-odbc_parse_connect_string_value_escaped(TDS_ERRS *errs, const char **current_position, const char **current_end, const char *connect_string_end, DSTR *value)
+odbc_parse_connect_string_value_escaped(TDS_ERRS *errs, char **current_position, char **current_end, char *connect_string_end, DSTR *value)
 {
-	const char *end;
+	char *end;
 	char *new_value_ptr;
-	char *new_value = strdup(*current_position);
 
-	if (!new_value){
-	   odbc_errs_add(errs, "HY001", NULL);
-	   return false;
-	}
 
-	for (end = *current_position + 1, new_value_ptr = new_value  ; end != connect_string_end; ++end) {
+	for (end = *current_position + 1, new_value_ptr = *current_position  ; end != connect_string_end; ++end) {
 		char peek = (end+1) == connect_string_end ? '\0' : *(end+1);
 		if (peek == '\0') {
 			odbc_errs_add(errs, "01S00", "Connection string ended without closing } character");
-			free(new_value);
 			return false;
 		}
 
@@ -317,24 +311,22 @@ odbc_parse_connect_string_value_escaped(TDS_ERRS *errs, const char **current_pos
 	}
 	*new_value_ptr = '\0';
 
-	if (!tds_dstr_copyn(value, new_value, strlen(new_value))) {
+	if (!tds_dstr_copyn(value, *current_position, strlen(*current_position))) {
 		odbc_errs_add(errs, "HY001", NULL);
-		free(new_value);
 		return false;
 	}
 
 	*current_end = end;
-	free(new_value);
 	return true;
 }
 
 static bool
-odbc_parse_connect_string_value_simple(TDS_ERRS *errs, const char **current_position, const char **current_end, const char *connect_string_end, DSTR *value)
+odbc_parse_connect_string_value_simple(TDS_ERRS *errs, char **current_position, char **current_end, char *connect_string_end, DSTR *value)
 {
-	const char *p = *current_position;
-	const char *end = *current_end;
+	char *p = *current_position;
+	char *end = *current_end;
 
-	end = (const char *) memchr(p, ';', connect_string_end - p);
+	end = (char *) memchr(p, ';', connect_string_end - p);
 
 	if (!end)
 		end = connect_string_end;
@@ -350,7 +342,7 @@ odbc_parse_connect_string_value_simple(TDS_ERRS *errs, const char **current_posi
 }
 
 static bool
-odbc_parse_connect_string_value(TDS_ERRS *errs, const char **current_position, const char **current_end, const char *connect_string_end, DSTR *value)
+odbc_parse_connect_string_value(TDS_ERRS *errs, char **current_position, char **current_end, char *connect_string_end, DSTR *value)
 {
 	if (**current_position == '{') {
 		return odbc_parse_connect_string_value_escaped(errs, current_position, current_end, connect_string_end, value);
@@ -501,7 +493,8 @@ bool
 odbc_parse_connect_string(TDS_ERRS *errs, const char *connect_string, const char *connect_string_end, TDSLOGIN * login,
 			  TDS_PARSED_PARAM *parsed_params)
 {
-	const char *p, *end;
+	char *p, *end;
+	char  *connection_string_copy, *connection_string_copy_end;
 	DSTR value = DSTR_INITIALIZER;
 	unsigned int cfgs = 0;	/* flags for indicate second parse of string */
 	char option[24];
@@ -512,14 +505,17 @@ odbc_parse_connect_string(TDS_ERRS *errs, const char *connect_string, const char
 	if (parsed_params)
 		tds_parsed_param_init(parsed_params);
 
-	for (p = connect_string; p < connect_string_end && *p;) {
+	connection_string_copy = strdup(connect_string);
+	connection_string_copy_end = connection_string_copy + strlen(connection_string_copy);
+
+	for (p = connection_string_copy; p < connection_string_copy_end && *p;) {
 
 		/* handle empty options */
-		while (p < connect_string_end && *p == ';')
+		while (p < connection_string_copy_end && *p == ';')
 			++p;
 
 		/* parse option */
-		end = (const char *) memchr(p, '=', connect_string_end - p);
+		end = (char *) memchr(p, '=', connection_string_copy_end - p);
 		if (!end)
 			break;
 
@@ -536,10 +532,12 @@ odbc_parse_connect_string(TDS_ERRS *errs, const char *connect_string, const char
 
 		/* parse value */
 		p = end + 1;
-		if (!odbc_parse_connect_string_value(errs, &p, &end, connect_string_end, &value)) {
+		if (!odbc_parse_connect_string_value(errs, &p, &end, connection_string_copy_end, &value)) {
 			if (parsed_params) {
 				tds_parsed_param_free(parsed_params);
 			}
+			if (connection_string_copy)
+                          free(connection_string_copy);
 			return false;
 		}
 
@@ -549,13 +547,15 @@ odbc_parse_connect_string(TDS_ERRS *errs, const char *connect_string, const char
 				if (parsed_params) {
 					tds_parsed_param_free(parsed_params);
 				}
+				if (connection_string_copy)
+                                  free(connection_string_copy);
 				return false;
 			case SPR_REPARSE:
-				p = connect_string;
+				p = connection_string_copy;
 			case SPR_CONTINUE:
 				p = end;
 				/* handle "" ";.." "};.." cases */
-				if (p >= connect_string_end)
+				if (p >= connection_string_copy_end)
 					break;
 				if (*p == '}')
 					++p;
@@ -569,14 +569,18 @@ odbc_parse_connect_string(TDS_ERRS *errs, const char *connect_string, const char
 			if (!tds_dstr_copyn(&parsed_params[ODBC_PARAM_Trusted_Connection], yes_value, strlen(yes_value))){
         return false;
       }
-			tds_dstr_empty(&parsed_params[ODBC_PARAM_UID]);
-			tds_dstr_empty(&parsed_params[ODBC_PARAM_PWD]);
+		if (connection_string_copy)
+                  free(connection_string_copy);
+		tds_dstr_empty(&parsed_params[ODBC_PARAM_UID]);
+		tds_dstr_empty(&parsed_params[ODBC_PARAM_PWD]);
 		}
 		tds_dstr_empty(&login->user_name);
 		tds_dstr_empty(&login->password);
 	}
 
 	tds_dstr_free(&value);
+	if (connection_string_copy)
+          free(connection_string_copy);
 	return true;
 }
 
