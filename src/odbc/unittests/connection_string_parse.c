@@ -84,7 +84,7 @@ test_special_symbols(void)
   TDS_ERRS errs = {0};
   TDSLOCALE *locale;
   TDS_PARSED_PARAM parsed_params[ODBC_PARAM_SIZE];
-  const char *connect_string = "DRIVER={libtdsodbc.so};SERVER={127.0.0.1};PORT={1337};UID={test_username};PWD={[]{}(),;?*=!@};DATABASE={test_db};ClientCharset={UTF-8};";
+  const char *connect_string = "DRIVER={libtdsodbc.so};SERVER={127.0.0.1};PORT={1337};UID={test_username};PWD={[]{}}(),;?*=!@};DATABASE={test_db};ClientCharset={UTF-8};";
 
   const char *connect_string_end = connect_string + strlen(connect_string);
   login = tds_alloc_login(0);
@@ -116,7 +116,7 @@ password_contains_curly_braces(void)
   TDS_ERRS errs = {0};
   TDSLOCALE *locale;
   TDS_PARSED_PARAM parsed_params[ODBC_PARAM_SIZE];
-  const char *connect_string = "DRIVER={libtdsodbc.so};SERVER={127.0.0.1};PORT={1337};UID={test_username};PWD={test{}_password};DATABASE={test_db};ClientCharset={UTF-8};";
+  const char *connect_string = "DRIVER={libtdsodbc.so};SERVER={127.0.0.1};PORT={1337};UID={test_username};PWD={test{}}_password};DATABASE={test_db};ClientCharset={UTF-8};";
 
   const char *connect_string_end = connect_string + strlen(connect_string);
   login = tds_alloc_login(0);
