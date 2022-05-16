@@ -10,7 +10,7 @@ HINSTANCE hinstFreeTDS;
 static void
 assert_equal_str(DSTR a, const char *b)
 {
-  assert(b && strncmp(tds_dstr_cstr(&a), b, tds_dstr_len(&a))==0);
+  assert(b && strcmp(tds_dstr_cstr(&a), b)==0);
 }
 
 static int
